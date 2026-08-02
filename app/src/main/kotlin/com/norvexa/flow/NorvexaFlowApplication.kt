@@ -1,7 +1,11 @@
 package com.norvexa.flow
 
 import android.app.Application
-import dagger.hilt.android.HiltAndroidApp
+import com.norvexa.flow.data.repository.AppContainer
+import com.norvexa.flow.notifications.ReminderScheduler
 
-@HiltAndroidApp
-class NorvexaFlowApplication : Application()
+class NorvexaFlowApplication : Application() {
+    lateinit var container: AppContainer
+        private set
+    override fun onCreate() { super.onCreate(); container = AppContainer(this); ReminderScheduler.schedule(this) }
+}

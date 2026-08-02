@@ -1,0 +1,27 @@
+# Gradle
+.gradle/
+build/
+**/build/
+.gradle-dist/
+
+# Local configuration
+local.properties
+
+# Android Studio / IntelliJ
+.idea/
+*.iml
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Signing
+*.jks
+*.keystore
+keystore.properties
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Generated Room schemas are intentionally versioned
+!app/schemas/

@@ -10,8 +10,8 @@ permissions:
 
 jobs:
   publish:
-    if: contains(github.event.head_commit.message, '[release alpha01]')
-    name: Build and publish v0.1.0-alpha01
+    if: contains(github.event.head_commit.message, '[release ui-alpha01]')
+    name: Build and publish v0.2.0-alpha01
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -41,34 +41,34 @@ jobs:
 
       - name: Prepare release asset
         run: |
-          cp app/build/outputs/apk/debug/app-debug.apk Norvexa-Flow-0.1.0-alpha01.apk
-          sha256sum Norvexa-Flow-0.1.0-alpha01.apk > Norvexa-Flow-0.1.0-alpha01.sha256
+          cp app/build/outputs/apk/debug/app-debug.apk Norvexa-Flow-0.2.0-alpha01.apk
+          sha256sum Norvexa-Flow-0.2.0-alpha01.apk > Norvexa-Flow-0.2.0-alpha01.sha256
           cat > release-notes.md <<'NOTES'
-          Первый тестовый релиз Norvexa Flow — локального финансового помощника для фрилансеров.
+          Norvexa Flow 0.2.0 alpha01 — крупный UI/UX редизайн.
 
-          Реализовано:
-          - кошельки, доходы и расходы;
-          - клиенты и ожидаемые оплаты;
-          - будущие расходы и финансовые резервы;
-          - прогноз движения денег и предупреждение о низком остатке;
-          - калькуляторы минимальной цены проекта и маржи;
-          - экспорт CSV и PDF;
-          - резервные копии `.nvxflow`;
-          - локальные уведомления;
-          - светлая и тёмная темы;
-          - защита экрана.
+          Основные изменения:
+          - новая дизайн-система в духе Apple Human Interface Guidelines;
+          - iOS-подобная светлая и тёмная палитра;
+          - крупная типографика и более ясная визуальная иерархия;
+          - переработанный финансовый обзор;
+          - новая нижняя навигация и меню добавления;
+          - компактные карточки операций, клиентов и будущих платежей;
+          - полностью переработанный раздел настроек без дублирующих кнопок;
+          - новый onboarding;
+          - единые радиусы, отступы, состояния, иконки и группировка данных;
+          - сохранён весь функционал версии 0.1.0.
 
-          Это debug-подписанная тестовая сборка. Приложение не подключается к банкам и не предоставляет бухгалтерских, налоговых, юридических или инвестиционных консультаций.
+          Это debug-подписанная тестовая сборка. При обновлении с предыдущей alpha Android может потребовать удалить старую debug-сборку из-за смены временного debug-ключа CI.
           NOTES
 
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create v0.1.0-alpha01 \
-            Norvexa-Flow-0.1.0-alpha01.apk \
-            Norvexa-Flow-0.1.0-alpha01.sha256 \
+          gh release create v0.2.0-alpha01 \
+            Norvexa-Flow-0.2.0-alpha01.apk \
+            Norvexa-Flow-0.2.0-alpha01.sha256 \
             --target "$GITHUB_SHA" \
-            --title "Norvexa Flow 0.1.0 alpha01" \
+            --title "Norvexa Flow 0.2.0 alpha01" \
             --notes-file release-notes.md \
             --prerelease

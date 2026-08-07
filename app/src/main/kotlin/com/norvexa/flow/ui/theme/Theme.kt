@@ -1,40 +1,74 @@
 package com.norvexa.flow.ui.theme
 
 import android.app.Activity
-import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Shapes
 import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.dynamicDarkColorScheme
-import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
 
 private val LightColors = lightColorScheme(
-    primary = Color(0xFF345E52),
+    primary = Color(0xFF007AFF),
     onPrimary = Color.White,
-    primaryContainer = Color(0xFFB7F0DD),
-    onPrimaryContainer = Color(0xFF002019),
-    secondary = Color(0xFF4C635B),
-    tertiary = Color(0xFF3F6375),
-    error = Color(0xFFBA1A1A),
-    background = Color(0xFFF7FAF7),
-    surface = Color(0xFFF7FAF7),
+    primaryContainer = Color(0xFFE8F2FF),
+    onPrimaryContainer = Color(0xFF00498F),
+    secondary = Color(0xFF8E8E93),
+    onSecondary = Color.White,
+    secondaryContainer = Color(0xFFE5E5EA),
+    onSecondaryContainer = Color(0xFF3A3A3C),
+    tertiary = Color(0xFF34C759),
+    onTertiary = Color.White,
+    error = Color(0xFFFF3B30),
+    onError = Color.White,
+    errorContainer = Color(0xFFFFE9E7),
+    onErrorContainer = Color(0xFF8A130D),
+    background = Color(0xFFF2F2F7),
+    onBackground = Color(0xFF1C1C1E),
+    surface = Color(0xFFFFFFFF),
+    onSurface = Color(0xFF1C1C1E),
+    surfaceVariant = Color(0xFFF2F2F7),
+    onSurfaceVariant = Color(0xFF6D6D72),
+    outline = Color(0xFFC7C7CC),
+    outlineVariant = Color(0xFFE5E5EA),
 )
 
 private val DarkColors = darkColorScheme(
-    primary = Color(0xFF9BD4C1),
-    onPrimary = Color(0xFF00382D),
-    primaryContainer = Color(0xFF175044),
-    onPrimaryContainer = Color(0xFFB7F0DD),
-    secondary = Color(0xFFB3CCC2),
-    tertiary = Color(0xFFA7CDDF),
-    background = Color(0xFF0F1513),
-    surface = Color(0xFF0F1513),
+    primary = Color(0xFF0A84FF),
+    onPrimary = Color.White,
+    primaryContainer = Color(0xFF0A355F),
+    onPrimaryContainer = Color(0xFFD6E9FF),
+    secondary = Color(0xFF98989D),
+    onSecondary = Color.Black,
+    secondaryContainer = Color(0xFF2C2C2E),
+    onSecondaryContainer = Color(0xFFE5E5EA),
+    tertiary = Color(0xFF30D158),
+    onTertiary = Color.Black,
+    error = Color(0xFFFF453A),
+    onError = Color.Black,
+    errorContainer = Color(0xFF571A17),
+    onErrorContainer = Color(0xFFFFDAD6),
+    background = Color(0xFF000000),
+    onBackground = Color(0xFFF2F2F7),
+    surface = Color(0xFF1C1C1E),
+    onSurface = Color(0xFFF2F2F7),
+    surfaceVariant = Color(0xFF2C2C2E),
+    onSurfaceVariant = Color(0xFFAEAEB2),
+    outline = Color(0xFF48484A),
+    outlineVariant = Color(0xFF38383A),
+)
+
+private val AppShapes = Shapes(
+    extraSmall = RoundedCornerShape(12.dp),
+    small = RoundedCornerShape(14.dp),
+    medium = RoundedCornerShape(18.dp),
+    large = RoundedCornerShape(22.dp),
+    extraLarge = RoundedCornerShape(28.dp),
 )
 
 @Composable
@@ -48,17 +82,22 @@ fun NorvexaFlowTheme(
         "LIGHT" -> false
         else -> isSystemInDarkTheme()
     }
-    val context = LocalContext.current
-    val colors = when {
-        dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && dark -> dynamicDarkColorScheme(context)
-        dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> dynamicLightColorScheme(context)
-        dark -> DarkColors
-        else -> LightColors
-    }
+    val colors = if (dark) DarkColors else LightColors
     val view = LocalView.current
+
     if (!view.isInEditMode) {
         val activity = view.context as? Activity
-        activity?.let { WindowCompat.getInsetsController(it.window, view).isAppearanceLightStatusBars = !dark }
+        activity?.let {
+            val controller = WindowCompat.getInsetsController(it.window, view)
+            controller.isAppearanceLightStatusBars = !dark
+            controller.isAppearanceLightNavigationBars = !dark
+        }
     }
-    MaterialTheme(colorScheme = colors, typography = AppTypography, content = content)
+
+    MaterialTheme(
+        colorScheme = colors,
+        typography = AppTypography,
+        shapes = AppShapes,
+        content = content,
+    )
 }

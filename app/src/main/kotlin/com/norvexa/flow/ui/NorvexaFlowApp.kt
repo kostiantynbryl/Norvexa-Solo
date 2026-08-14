@@ -1,7 +1,14 @@
 package com.norvexa.flow.ui
 
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AccountBalanceWallet
@@ -45,6 +52,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.norvexa.flow.data.local.ReserveEntity
 import com.norvexa.flow.domain.TransactionType
+import com.norvexa.flow.domain.formatMoney
 import com.norvexa.flow.ui.components.AddClientDialog
 import com.norvexa.flow.ui.components.AddExpenseDialog
 import com.norvexa.flow.ui.components.AddReceivableDialog
@@ -57,6 +65,7 @@ import com.norvexa.flow.ui.components.MarginCalculatorDialog
 import com.norvexa.flow.ui.components.PriceCalculatorDialog
 import com.norvexa.flow.ui.components.SettingsDialog
 import com.norvexa.flow.ui.components.UpdateReserveDialog
+import com.norvexa.flow.ui.components.WalletPickerDialog
 import com.norvexa.flow.ui.screens.ActivityScreen
 import com.norvexa.flow.ui.screens.ClientsScreen
 import com.norvexa.flow.ui.screens.DashboardScreen
@@ -111,6 +120,8 @@ fun NorvexaFlowApp(viewModel: MainViewModel) {
     var showAddSheet by remember { mutableStateOf(false) }
     var dialog by remember { mutableStateOf<DialogType?>(null) }
     var reserveToUpdate by remember { mutableStateOf<ReserveEntity?>(null) }
+    var receivableToSettleId by remember { mutableStateOf<Long?>(null) }
+    var expenseToSettleId by remember { mutableStateOf<Long?>(null) }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -185,8 +196,8 @@ fun NorvexaFlowApp(viewModel: MainViewModel) {
                     receivables = data.receivables,
                     expenses = data.plannedExpenses,
                     clients = data.clients,
-                    onPayReceivable = viewModel::markReceivablePaid,
-                    onCompleteExpense = viewModel::markExpenseCompleted,
+                    onPayReceivable = { receivableToSettleId = it },
+                    onCompleteExpense = { expenseToSettleId = it },
                 )
                 MainSection.ACTIVITY -> ActivityScreen(
                     transactions = data.transactions,
@@ -198,13 +209,13 @@ fun NorvexaFlowApp(viewModel: MainViewModel) {
                 MainSection.CLIENTS -> ClientsScreen(
                     clients = data.clients,
                     receivables = data.receivables,
-                    onPaid = viewModel::markReceivablePaid,
+                    onPaid = { receivableToSettleId = it },
                     onDelete = viewModel::deleteReceivable,
                 )
                 MainSection.PLANNING -> PlanningScreen(
                     expenses = data.plannedExpenses,
                     reserves = data.reserves,
-                    onCompleteExpense = viewModel::markExpenseCompleted,
+                    onCompleteExpense = { expenseToSettleId = it },
                     onDeleteExpense = viewModel::deletePlannedExpense,
                     onUpdateReserve = { reserveToUpdate = it },
                     onDeleteReserve = viewModel::deleteReserve,
@@ -343,6 +354,35 @@ fun NorvexaFlowApp(viewModel: MainViewModel) {
         ) {
             viewModel.updateReserve(reserve.id, it)
             reserveToUpdate = null
+        }
+    }
+
+    receivableToSettleId?.let { id ->
+        data.receivables.firstOrNull { it.id == id }?.let { receivable ->
+            val remaining = (receivable.amountMinor - receivable.receivedMinor).coerceAtLeast(0)
+            WalletPickerDialog(
+                title = "Зачислить оплату",
+                amountLabel = "${receivable.title}: ${formatMoney(remaining, receivable.currency)}",
+                wallets = data.wallets,
+                onDismiss = { receivableToSettleId = null },
+            ) { walletId ->
+                viewModel.settleReceivable(id, walletId)
+                receivableToSettleId = null
+            }
+        }
+    }
+
+    expenseToSettleId?.let { id ->
+        data.plannedExpenses.firstOrNull { it.id == id }?.let { expense ->
+            WalletPickerDialog(
+                title = "Оплатить расход",
+                amountLabel = "${expense.title}: ${formatMoney(expense.amountMinor, expense.currency)}",
+                wallets = data.wallets,
+                onDismiss = { expenseToSettleId = null },
+            ) { walletId ->
+                viewModel.settlePlannedExpense(id, walletId)
+                expenseToSettleId = null
+            }
         }
     }
 }

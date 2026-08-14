@@ -11,12 +11,15 @@ import com.norvexa.flow.domain.ReceivableStatus
 import com.norvexa.flow.domain.TransactionType
 import com.norvexa.flow.domain.formatMoney
 import com.norvexa.flow.domain.minorToDecimal
+import java.io.ByteArrayOutputStream
 import java.io.OutputStreamWriter
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 
 object ExportManager {
+    private const val MAX_BACKUP_BYTES = 25 * 1024 * 1024
+
     fun writeCsv(context: Context, uri: Uri, data: FinanceData) {
         context.contentResolver.openOutputStream(uri)?.use { stream ->
             OutputStreamWriter(stream, Charsets.UTF_8).use { writer ->
@@ -58,11 +61,22 @@ object ExportManager {
     }
 
     fun readBackup(context: Context, uri: Uri): BackupPayload {
-        val text = context.contentResolver.openInputStream(uri)
-            ?.bufferedReader(Charsets.UTF_8)
-            ?.use { it.readText() }
+        val input = context.contentResolver.openInputStream(uri)
             ?: error("Не удалось прочитать резервную копию")
-        return BackupCodec.decode(text)
+        val bytes = input.use { stream ->
+            val output = ByteArrayOutputStream()
+            val buffer = ByteArray(16 * 1024)
+            var total = 0
+            while (true) {
+                val read = stream.read(buffer)
+                if (read < 0) break
+                total += read
+                require(total <= MAX_BACKUP_BYTES) { "Резервная копия слишком большая" }
+                output.write(buffer, 0, read)
+            }
+            output.toByteArray()
+        }
+        return BackupCodec.decode(bytes.toString(Charsets.UTF_8))
     }
 
     fun writePdf(context: Context, uri: Uri, data: FinanceData, settings: UserSettings) {
@@ -78,57 +92,60 @@ object ExportManager {
         )
 
         val document = PdfDocument()
-        val pdf = PdfWriter(document)
-        pdf.heading("Norvexa Flow — финансовый отчёт", 22f)
-        pdf.line("Дата: ${LocalDate.now()}")
-        pdf.space(8f)
-        pdf.heading("Сводка")
-        listOf(
-            "Общий баланс: ${formatMoney(summary.totalBalanceMinor, settings.baseCurrency)}",
-            "Доступно сейчас: ${formatMoney(summary.availableNowMinor, settings.baseCurrency)}",
-            "Защищённые резервы: ${formatMoney(summary.protectedReservesMinor, settings.baseCurrency)}",
-            "Плановый налоговый резерв месяца: ${formatMoney(summary.suggestedTaxReserveMinor, settings.baseCurrency)}",
-            "Ожидаемые оплаты: ${formatMoney(summary.openReceivablesMinor, settings.baseCurrency)}",
-            "Плановые расходы 30 дней: ${formatMoney(summary.mandatoryExpenses30Minor, settings.baseCurrency)}",
-            "Прогноз через 30 дней: ${formatMoney(summary.projected30Minor, settings.baseCurrency)}",
-        ).forEach(pdf::line)
+        try {
+            val pdf = PdfWriter(document)
+            pdf.heading("Norvexa Flow — финансовый отчёт", 22f)
+            pdf.line("Дата: ${LocalDate.now()}")
+            pdf.space(8f)
+            pdf.heading("Сводка")
+            listOf(
+                "Общий баланс: ${formatMoney(summary.totalBalanceMinor, settings.baseCurrency)}",
+                "Доступно сейчас: ${formatMoney(summary.availableNowMinor, settings.baseCurrency)}",
+                "Защищённые резервы: ${formatMoney(summary.protectedReservesMinor, settings.baseCurrency)}",
+                "Плановый налоговый резерв месяца: ${formatMoney(summary.suggestedTaxReserveMinor, settings.baseCurrency)}",
+                "Ожидаемые оплаты: ${formatMoney(summary.openReceivablesMinor, settings.baseCurrency)}",
+                "Плановые расходы 30 дней: ${formatMoney(summary.mandatoryExpenses30Minor, settings.baseCurrency)}",
+                "Прогноз через 30 дней: ${formatMoney(summary.projected30Minor, settings.baseCurrency)}",
+            ).forEach(pdf::line)
 
-        pdf.space(12f)
-        pdf.heading("Открытые оплаты")
-        val openReceivables = data.receivables.filter {
-            it.status != ReceivableStatus.PAID && it.status != ReceivableStatus.CANCELLED
-        }
-        if (openReceivables.isEmpty()) {
-            pdf.line("Нет открытых оплат")
-        } else {
-            openReceivables.forEach { receivable ->
-                val client = data.clients.firstOrNull { it.id == receivable.clientId }?.name ?: "Клиент"
-                pdf.line(
-                    "$client — ${receivable.title}: " +
-                        "${formatMoney((receivable.amountMinor - receivable.receivedMinor).coerceAtLeast(0), receivable.currency)} " +
-                        "до ${LocalDate.ofEpochDay(receivable.expectedAtEpochDay)}",
-                )
+            pdf.space(12f)
+            pdf.heading("Открытые оплаты")
+            val openReceivables = data.receivables.filter {
+                it.status != ReceivableStatus.PAID && it.status != ReceivableStatus.CANCELLED
             }
-        }
-
-        pdf.space(12f)
-        pdf.heading("Операции")
-        if (data.transactions.isEmpty()) {
-            pdf.line("Нет операций")
-        } else {
-            data.transactions.forEach { tx ->
-                val sign = if (tx.type == TransactionType.INCOME) "+" else "−"
-                val date = Instant.ofEpochMilli(tx.occurredAtEpochMillis)
-                    .atZone(ZoneId.systemDefault())
-                    .toLocalDate()
-                pdf.line("$date · $sign ${formatMoney(tx.amountMinor, tx.currency)} · ${tx.category}")
+            if (openReceivables.isEmpty()) {
+                pdf.line("Нет открытых оплат")
+            } else {
+                openReceivables.forEach { receivable ->
+                    val client = data.clients.firstOrNull { it.id == receivable.clientId }?.name ?: "Клиент"
+                    pdf.line(
+                        "$client — ${receivable.title}: " +
+                            "${formatMoney((receivable.amountMinor - receivable.receivedMinor).coerceAtLeast(0), receivable.currency)} " +
+                            "до ${LocalDate.ofEpochDay(receivable.expectedAtEpochDay)}",
+                    )
+                }
             }
-        }
 
-        pdf.finish()
-        context.contentResolver.openOutputStream(uri)?.use { document.writeTo(it) }
-            ?: error("Не удалось открыть файл для PDF")
-        document.close()
+            pdf.space(12f)
+            pdf.heading("Операции")
+            if (data.transactions.isEmpty()) {
+                pdf.line("Нет операций")
+            } else {
+                data.transactions.forEach { tx ->
+                    val sign = if (tx.type == TransactionType.INCOME) "+" else "−"
+                    val date = Instant.ofEpochMilli(tx.occurredAtEpochMillis)
+                        .atZone(ZoneId.systemDefault())
+                        .toLocalDate()
+                    pdf.line("$date · $sign ${formatMoney(tx.amountMinor, tx.currency)} · ${tx.category}")
+                }
+            }
+
+            pdf.finish()
+            context.contentResolver.openOutputStream(uri)?.use { document.writeTo(it) }
+                ?: error("Не удалось открыть файл для PDF")
+        } finally {
+            document.close()
+        }
     }
 
     private fun csv(value: String): String {
@@ -193,11 +210,11 @@ object ExportManager {
         }
 
         private fun drawWrapped(text: String, paint: Paint, lineHeight: Float) {
-            val canvas = page?.canvas ?: return
             val maxWidth = 515f
             var rest = text
             while (rest.isNotEmpty()) {
                 ensureSpace(lineHeight)
+                val canvas = page?.canvas ?: return
                 var count = paint.breakText(rest, true, maxWidth, null).coerceAtLeast(1)
                 if (count < rest.length) {
                     val split = rest.lastIndexOf(' ', startIndex = count - 1)

@@ -43,6 +43,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.norvexa.flow.BuildConfig
 import com.norvexa.flow.data.local.ClientEntity
 import com.norvexa.flow.data.local.PlannedExpenseEntity
 import com.norvexa.flow.data.local.ReceivableEntity
@@ -139,6 +140,7 @@ fun ActivityScreen(
                                 client?.name,
                                 date.toString(),
                                 transaction.note.takeIf { it.isNotBlank() },
+                                "автоматически".takeIf { transaction.sourceType != null },
                             ).joinToString(" · "),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -151,16 +153,18 @@ fun ActivityScreen(
                             fontWeight = FontWeight.Bold,
                             color = if (income) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSurface,
                         )
-                        IconButton(
-                            onClick = { onDelete(transaction.id) },
-                            modifier = Modifier.size(34.dp),
-                        ) {
-                            Icon(
-                                Icons.Rounded.DeleteOutline,
-                                contentDescription = "Удалить",
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(19.dp),
-                            )
+                        if (transaction.sourceType == null) {
+                            IconButton(
+                                onClick = { onDelete(transaction.id) },
+                                modifier = Modifier.size(48.dp),
+                            ) {
+                                Icon(
+                                    Icons.Rounded.DeleteOutline,
+                                    contentDescription = "Удалить",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(20.dp),
+                                )
+                            }
                         }
                     }
                 }
@@ -203,7 +207,16 @@ fun ClientsScreen(
 
         items(clients, key = { "c${it.id}" }) { client ->
             val debts = open.filter { it.clientId == client.id }
-            val total = debts.sumOf { (it.amountMinor - it.receivedMinor).coerceAtLeast(0) }
+            val totalsByCurrency = debts
+                .groupBy { it.currency }
+                .mapValues { (_, values) -> values.sumOf { (it.amountMinor - it.receivedMinor).coerceAtLeast(0) } }
+            val headlineAmount = if (totalsByCurrency.size == 1) {
+                totalsByCurrency.entries.first().let { formatMoney(it.value, it.key) }
+            } else if (totalsByCurrency.isEmpty()) {
+                formatMoney(0, client.defaultCurrency)
+            } else {
+                "${totalsByCurrency.size} валюты"
+            }
 
             GroupCard(Modifier.fillMaxWidth()) {
                 Column {
@@ -231,7 +244,7 @@ fun ClientsScreen(
                         }
                         Column(horizontalAlignment = Alignment.End) {
                             Text(
-                                formatMoney(total, client.defaultCurrency),
+                                headlineAmount,
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Bold,
                             )
@@ -260,7 +273,7 @@ fun ClientsScreen(
                                 modifier = Modifier.padding(start = 16.dp),
                             )
                             Row(
-                                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                             ) {
@@ -285,7 +298,7 @@ fun ClientsScreen(
                                 )
                                 IconButton(
                                     onClick = { onPaid(receivable.id) },
-                                    modifier = Modifier.size(36.dp),
+                                    modifier = Modifier.size(48.dp),
                                 ) {
                                     Icon(
                                         Icons.Rounded.Done,
@@ -295,7 +308,7 @@ fun ClientsScreen(
                                 }
                                 IconButton(
                                     onClick = { onDelete(receivable.id) },
-                                    modifier = Modifier.size(36.dp),
+                                    modifier = Modifier.size(48.dp),
                                 ) {
                                     Icon(
                                         Icons.Rounded.DeleteOutline,
@@ -475,7 +488,7 @@ fun PlanningScreen(
                             Row {
                                 IconButton(
                                     onClick = { onCompleteExpense(expense.id) },
-                                    modifier = Modifier.size(36.dp),
+                                    modifier = Modifier.size(48.dp),
                                 ) {
                                     Icon(
                                         Icons.Rounded.Done,
@@ -485,7 +498,7 @@ fun PlanningScreen(
                                 }
                                 IconButton(
                                     onClick = { onDeleteExpense(expense.id) },
-                                    modifier = Modifier.size(36.dp),
+                                    modifier = Modifier.size(48.dp),
                                 ) {
                                     Icon(
                                         Icons.Rounded.DeleteOutline,
@@ -608,7 +621,7 @@ fun MoreScreen(
                     SettingsRow(
                         icon = Icons.Rounded.PictureAsPdf,
                         title = "Финансовый отчёт PDF",
-                        subtitle = "Сводка, оплаты и операции",
+                        subtitle = "Многостраничная сводка, оплаты и операции",
                         showDivider = true,
                     ) {
                         pdf.launch("norvexa-flow-report-${LocalDate.now()}.pdf")
@@ -616,7 +629,7 @@ fun MoreScreen(
                     SettingsRow(
                         icon = Icons.Rounded.Backup,
                         title = "Создать резервную копию",
-                        subtitle = "Локальный файл .nvxflow",
+                        subtitle = "Финансовые данные и настройки · .nvxflow v2",
                         showDivider = true,
                     ) {
                         backup.launch("norvexa-flow-${LocalDate.now()}.nvxflow")
@@ -624,7 +637,7 @@ fun MoreScreen(
                     SettingsRow(
                         icon = Icons.Rounded.Restore,
                         title = "Восстановить копию",
-                        subtitle = "Текущие данные будут заменены",
+                        subtitle = "Текущие данные будут заменены после проверки файла",
                     ) {
                         restore.launch(arrayOf("application/octet-stream", "application/json", "text/plain"))
                     }
@@ -677,7 +690,7 @@ fun MoreScreen(
                         fontWeight = FontWeight.SemiBold,
                     )
                     Text(
-                        "0.2.0 alpha01 · локальный финансовый помощник",
+                        "${BuildConfig.VERSION_NAME} · локальный финансовый помощник",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -688,7 +701,7 @@ fun MoreScreen(
                     )
                     OutlinedButton(
                         onClick = onClearData,
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
                     ) {
                         Text("Удалить все финансовые данные")
@@ -792,7 +805,7 @@ private fun ThemeChoice(
     if (selected) {
         Button(
             onClick = onClick,
-            modifier = modifier.height(46.dp),
+            modifier = modifier.height(48.dp),
             contentPadding = PaddingValues(horizontal = 6.dp),
             elevation = ButtonDefaults.buttonElevation(defaultElevation = 0.dp),
         ) {
@@ -803,7 +816,7 @@ private fun ThemeChoice(
     } else {
         OutlinedButton(
             onClick = onClick,
-            modifier = modifier.height(46.dp),
+            modifier = modifier.height(48.dp),
             contentPadding = PaddingValues(horizontal = 6.dp),
         ) {
             Icon(icon, contentDescription = null, modifier = Modifier.size(17.dp))

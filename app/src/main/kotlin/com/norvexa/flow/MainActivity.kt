@@ -16,18 +16,37 @@ import com.norvexa.flow.ui.NorvexaFlowApp
 import com.norvexa.flow.ui.theme.NorvexaFlowTheme
 
 class MainActivity : ComponentActivity() {
-    private val permissionLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
+    private val permissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { }
+
     private val viewModel: MainViewModel by viewModels {
         val app = application as NorvexaFlowApplication
         MainViewModel.Factory(app.container.repository, app.container.settingsStore)
     }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        if (Build.VERSION.SDK_INT >= 33) permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         setContent {
             val settings by viewModel.settings.collectAsStateWithLifecycle()
-            LaunchedEffect(settings.privacyMode) { if (settings.privacyMode) window.addFlags(WindowManager.LayoutParams.FLAG_SECURE) else window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE) }
-            NorvexaFlowTheme(settings.darkMode) { NorvexaFlowApp(viewModel) }
+
+            LaunchedEffect(settings.onboardingCompleted) {
+                if (settings.onboardingCompleted && Build.VERSION.SDK_INT >= 33) {
+                    permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                }
+            }
+
+            LaunchedEffect(settings.privacyMode) {
+                if (settings.privacyMode) {
+                    window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+                } else {
+                    window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+                }
+            }
+
+            NorvexaFlowTheme(settings.darkMode) {
+                NorvexaFlowApp(viewModel)
+            }
         }
     }
 }

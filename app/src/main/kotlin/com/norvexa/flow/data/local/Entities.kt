@@ -14,7 +14,10 @@ data class WalletEntity(
     val isActive: Boolean = true,
 )
 
-@Entity(tableName = "transactions", indices = [Index("walletId"), Index("clientId")])
+@Entity(
+    tableName = "transactions",
+    indices = [Index("walletId"), Index("clientId")],
+)
 data class TransactionEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val walletId: Long,
@@ -26,6 +29,8 @@ data class TransactionEntity(
     val category: String,
     val note: String = "",
     val occurredAtEpochMillis: Long = System.currentTimeMillis(),
+    val sourceType: String? = null,
+    val sourceId: Long? = null,
 )
 
 @Entity(tableName = "clients")

@@ -13,6 +13,7 @@ import com.norvexa.flow.domain.FinanceData
 import com.norvexa.flow.domain.FinancialCalculator
 import com.norvexa.flow.domain.ReceivableStatus
 import com.norvexa.flow.domain.TransactionType
+import com.norvexa.flow.domain.isValidCurrencyCode
 import java.time.LocalDate
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
@@ -66,7 +67,7 @@ class FinanceRepository(
         rateToBaseMicros: Long,
     ): Long {
         require(name.isNotBlank())
-        require(currency.length == 3)
+        require(isValidCurrencyCode(currency)) { "Некорректный код валюты" }
         require(rateToBaseMicros > 0)
         return dao.insertWallet(
             WalletEntity(
@@ -113,6 +114,9 @@ class FinanceRepository(
     suspend fun deleteTransaction(id: Long) {
         database.withTransaction {
             val transaction = dao.getTransaction(id) ?: return@withTransaction
+            require(transaction.sourceType == null) {
+                "Автоматическую операцию нельзя удалить отдельно от связанного платежа"
+            }
             val wallet = dao.getWallet(transaction.walletId)
                 ?: error("Кошелёк операции не найден")
             val rollback = if (transaction.type == TransactionType.INCOME) {
@@ -127,7 +131,7 @@ class FinanceRepository(
 
     suspend fun addClient(name: String, email: String, currency: String, note: String): Long {
         require(name.isNotBlank())
-        require(currency.length == 3)
+        require(isValidCurrencyCode(currency)) { "Некорректный код валюты" }
         return dao.insertClient(
             ClientEntity(
                 name = name.trim(),
@@ -143,6 +147,7 @@ class FinanceRepository(
         require(value.receivedMinor in 0..value.amountMinor)
         require(value.rateToBaseMicros > 0)
         require(value.probabilityPercent in 0..100)
+        require(isValidCurrencyCode(value.currency)) { "Некорректный код валюты" }
         return dao.insertReceivable(value)
     }
 
@@ -192,6 +197,8 @@ class FinanceRepository(
                     rateToBaseMicros = wallet.rateToBaseMicros,
                     category = "Оплата клиента",
                     note = receivable.title,
+                    sourceType = SOURCE_RECEIVABLE,
+                    sourceId = receivable.id,
                 ),
             )
 
@@ -217,6 +224,7 @@ class FinanceRepository(
         require(value.amountMinor > 0)
         require(value.rateToBaseMicros > 0)
         require(value.recurrence in setOf("NONE", "MONTHLY", "YEARLY"))
+        require(isValidCurrencyCode(value.currency)) { "Некорректный код валюты" }
         return dao.insertPlannedExpense(value)
     }
 
@@ -224,7 +232,6 @@ class FinanceRepository(
         id: Long,
         walletId: Long,
         baseCurrency: String,
-        today: LocalDate = LocalDate.now(),
     ) {
         database.withTransaction {
             val expense = dao.getPlannedExpense(id) ?: error("Плановый расход не найден")
@@ -258,6 +265,8 @@ class FinanceRepository(
                     rateToBaseMicros = wallet.rateToBaseMicros,
                     category = expense.category.trim().ifEmpty { "Плановый расход" },
                     note = expense.title,
+                    sourceType = SOURCE_PLANNED_EXPENSE,
+                    sourceId = expense.id,
                 ),
             )
 
@@ -288,6 +297,7 @@ class FinanceRepository(
         require(value.targetMinor > 0)
         require(value.currentMinor >= 0)
         require(value.rateToBaseMicros > 0)
+        require(isValidCurrencyCode(value.currency)) { "Некорректный код валюты" }
         return dao.insertReserve(value)
     }
 
@@ -339,13 +349,29 @@ class FinanceRepository(
         }
         val walletIds = data.wallets.map { it.id }.toSet()
         val clientIds = data.clients.map { it.id }.toSet()
-        require(data.wallets.all { it.rateToBaseMicros > 0 && it.currency.length == 3 })
-        require(data.transactions.all {
-            it.walletId in walletIds &&
-                (it.clientId == null || it.clientId in clientIds) &&
-                it.amountMinor > 0 &&
-                it.rateToBaseMicros > 0 &&
-                it.type in setOf(TransactionType.INCOME, TransactionType.EXPENSE)
+        val receivableIds = data.receivables.map { it.id }.toSet()
+        val plannedExpenseIds = data.plannedExpenses.map { it.id }.toSet()
+
+        require(data.wallets.all {
+            it.rateToBaseMicros > 0 && isValidCurrencyCode(it.currency)
+        }) { "Некорректные кошельки в резервной копии" }
+        require(data.clients.all { isValidCurrencyCode(it.defaultCurrency) }) {
+            "Некорректные валюты клиентов в резервной копии"
+        }
+        require(data.transactions.all { transaction ->
+            val sourceValid = when (transaction.sourceType) {
+                null -> transaction.sourceId == null
+                SOURCE_RECEIVABLE -> transaction.sourceId in receivableIds
+                SOURCE_PLANNED_EXPENSE -> transaction.sourceId in plannedExpenseIds
+                else -> false
+            }
+            transaction.walletId in walletIds &&
+                (transaction.clientId == null || transaction.clientId in clientIds) &&
+                transaction.amountMinor > 0 &&
+                transaction.rateToBaseMicros > 0 &&
+                transaction.type in setOf(TransactionType.INCOME, TransactionType.EXPENSE) &&
+                isValidCurrencyCode(transaction.currency) &&
+                sourceValid
         }) { "Некорректные операции в резервной копии" }
         require(data.receivables.all {
             it.clientId in clientIds &&
@@ -353,6 +379,7 @@ class FinanceRepository(
                 it.receivedMinor in 0..it.amountMinor &&
                 it.rateToBaseMicros > 0 &&
                 it.probabilityPercent in 0..100 &&
+                isValidCurrencyCode(it.currency) &&
                 it.status in setOf(
                     ReceivableStatus.EXPECTED,
                     ReceivableStatus.PARTIAL,
@@ -363,10 +390,19 @@ class FinanceRepository(
         require(data.plannedExpenses.all {
             it.amountMinor > 0 &&
                 it.rateToBaseMicros > 0 &&
+                isValidCurrencyCode(it.currency) &&
                 it.recurrence in setOf("NONE", "MONTHLY", "YEARLY")
         }) { "Некорректные плановые расходы в резервной копии" }
         require(data.reserves.all {
-            it.targetMinor > 0 && it.currentMinor >= 0 && it.rateToBaseMicros > 0
+            it.targetMinor > 0 &&
+                it.currentMinor >= 0 &&
+                it.rateToBaseMicros > 0 &&
+                isValidCurrencyCode(it.currency)
         }) { "Некорректные резервы в резервной копии" }
+    }
+
+    companion object {
+        const val SOURCE_RECEIVABLE = "RECEIVABLE"
+        const val SOURCE_PLANNED_EXPENSE = "PLANNED_EXPENSE"
     }
 }

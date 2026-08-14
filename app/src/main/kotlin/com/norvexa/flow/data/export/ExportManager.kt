@@ -10,6 +10,7 @@ import com.norvexa.flow.domain.FinancialCalculator
 import com.norvexa.flow.domain.ReceivableStatus
 import com.norvexa.flow.domain.TransactionType
 import com.norvexa.flow.domain.formatMoney
+import com.norvexa.flow.domain.minorToDecimal
 import java.io.OutputStreamWriter
 import java.time.Instant
 import java.time.LocalDate
@@ -19,30 +20,194 @@ object ExportManager {
     fun writeCsv(context: Context, uri: Uri, data: FinanceData) {
         context.contentResolver.openOutputStream(uri)?.use { stream ->
             OutputStreamWriter(stream, Charsets.UTF_8).use { writer ->
+                writer.append('\uFEFF')
                 writer.appendLine("type,date,wallet,client,category,amount,currency,note")
                 data.transactions.forEach { tx ->
-                    val date = Instant.ofEpochMilli(tx.occurredAtEpochMillis).atZone(ZoneId.systemDefault()).toLocalDate()
+                    val date = Instant.ofEpochMilli(tx.occurredAtEpochMillis)
+                        .atZone(ZoneId.systemDefault())
+                        .toLocalDate()
                     val wallet = data.wallets.firstOrNull { it.id == tx.walletId }?.name.orEmpty()
                     val client = data.clients.firstOrNull { it.id == tx.clientId }?.name.orEmpty()
-                    writer.appendLine(listOf(tx.type,date.toString(),wallet,client,tx.category,(tx.amountMinor/100.0).toString(),tx.currency,tx.note).joinToString(",") { csv(it) })
+                    val amount = minorToDecimal(tx.amountMinor, tx.currency).toPlainString()
+                    writer.appendLine(
+                        listOf(
+                            tx.type,
+                            date.toString(),
+                            wallet,
+                            client,
+                            tx.category,
+                            amount,
+                            tx.currency,
+                            tx.note,
+                        ).joinToString(",") { csv(it) },
+                    )
                 }
             }
-        } ?: error("Cannot open destination")
+        } ?: error("Не удалось открыть файл для CSV")
     }
-    fun writeBackup(context: Context, uri: Uri, data: FinanceData) { context.contentResolver.openOutputStream(uri)?.use { it.write(BackupCodec.encode(data).toByteArray(Charsets.UTF_8)) } ?: error("Cannot open destination") }
-    fun readBackup(context: Context, uri: Uri): FinanceData { val text = context.contentResolver.openInputStream(uri)?.bufferedReader(Charsets.UTF_8)?.use { it.readText() } ?: error("Cannot read backup"); return BackupCodec.decode(text) }
+
+    fun writeBackup(
+        context: Context,
+        uri: Uri,
+        data: FinanceData,
+        settings: UserSettings,
+    ) {
+        context.contentResolver.openOutputStream(uri)?.use {
+            it.write(BackupCodec.encode(data, settings).toByteArray(Charsets.UTF_8))
+        } ?: error("Не удалось открыть файл резервной копии")
+    }
+
+    fun readBackup(context: Context, uri: Uri): BackupPayload {
+        val text = context.contentResolver.openInputStream(uri)
+            ?.bufferedReader(Charsets.UTF_8)
+            ?.use { it.readText() }
+            ?: error("Не удалось прочитать резервную копию")
+        return BackupCodec.decode(text)
+    }
+
     fun writePdf(context: Context, uri: Uri, data: FinanceData, settings: UserSettings) {
-        val summary = FinancialCalculator.dashboard(data.wallets,data.transactions,data.receivables,data.plannedExpenses,data.reserves,settings.taxPercent,settings.safeBalanceMinor)
-        val doc = PdfDocument(); val page = doc.startPage(PdfDocument.PageInfo.Builder(595,842,1).create()); val canvas = page.canvas
-        val title = Paint().apply { textSize=22f; isFakeBoldText=true }; val heading=Paint().apply{textSize=14f;isFakeBoldText=true}; val body=Paint().apply{textSize=11f}; var y=48f
-        canvas.drawText("Norvexa Flow — финансовый отчёт",40f,y,title); y+=30f; canvas.drawText("Дата: ${LocalDate.now()}",40f,y,body); y+=28f; canvas.drawText("Сводка",40f,y,heading); y+=22f
-        listOf("Общий баланс: ${formatMoney(summary.totalBalanceMinor,settings.baseCurrency)}","Доступно сейчас: ${formatMoney(summary.availableNowMinor,settings.baseCurrency)}","Защищённые резервы: ${formatMoney(summary.protectedReservesMinor,settings.baseCurrency)}","Ожидаемые оплаты: ${formatMoney(summary.openReceivablesMinor,settings.baseCurrency)}","Плановые расходы 30 дней: ${formatMoney(summary.mandatoryExpenses30Minor,settings.baseCurrency)}","Прогноз через 30 дней: ${formatMoney(summary.projected30Minor,settings.baseCurrency)}").forEach { canvas.drawText(it,40f,y,body); y+=18f }
-        y+=16f; canvas.drawText("Открытые оплаты",40f,y,heading); y+=22f
-        data.receivables.filter { it.status!=ReceivableStatus.PAID && it.status!=ReceivableStatus.CANCELLED }.take(15).forEach { r -> val c=data.clients.firstOrNull{it.id==r.clientId}?.name?:"Клиент"; canvas.drawText("$c — ${r.title}: ${formatMoney((r.amountMinor-r.receivedMinor).coerceAtLeast(0),r.currency)} до ${LocalDate.ofEpochDay(r.expectedAtEpochDay)}",40f,y,body); y+=17f }
-        y+=14f; canvas.drawText("Последние операции",40f,y,heading); y+=22f
-        data.transactions.take(15).forEach { tx -> canvas.drawText("${if(tx.type==TransactionType.INCOME) "+" else "−"} ${formatMoney(tx.amountMinor,tx.currency)} — ${tx.category}",40f,y,body); y+=17f }
-        canvas.drawText("Документ предназначен для личного планирования и не является бухгалтерской или налоговой отчётностью.",40f,810f,Paint().apply{textSize=8f})
-        doc.finishPage(page); context.contentResolver.openOutputStream(uri)?.use { doc.writeTo(it) } ?: error("Cannot open destination"); doc.close()
+        val summary = FinancialCalculator.dashboard(
+            wallets = data.wallets,
+            transactions = data.transactions,
+            receivables = data.receivables,
+            expenses = data.plannedExpenses,
+            reserves = data.reserves,
+            taxPercent = settings.taxPercent,
+            safeBalanceMinor = settings.safeBalanceMinor,
+            baseCurrency = settings.baseCurrency,
+        )
+
+        val document = PdfDocument()
+        val pdf = PdfWriter(document)
+        pdf.heading("Norvexa Flow — финансовый отчёт", 22f)
+        pdf.line("Дата: ${LocalDate.now()}")
+        pdf.space(8f)
+        pdf.heading("Сводка")
+        listOf(
+            "Общий баланс: ${formatMoney(summary.totalBalanceMinor, settings.baseCurrency)}",
+            "Доступно сейчас: ${formatMoney(summary.availableNowMinor, settings.baseCurrency)}",
+            "Защищённые резервы: ${formatMoney(summary.protectedReservesMinor, settings.baseCurrency)}",
+            "Плановый налоговый резерв месяца: ${formatMoney(summary.suggestedTaxReserveMinor, settings.baseCurrency)}",
+            "Ожидаемые оплаты: ${formatMoney(summary.openReceivablesMinor, settings.baseCurrency)}",
+            "Плановые расходы 30 дней: ${formatMoney(summary.mandatoryExpenses30Minor, settings.baseCurrency)}",
+            "Прогноз через 30 дней: ${formatMoney(summary.projected30Minor, settings.baseCurrency)}",
+        ).forEach(pdf::line)
+
+        pdf.space(12f)
+        pdf.heading("Открытые оплаты")
+        val openReceivables = data.receivables.filter {
+            it.status != ReceivableStatus.PAID && it.status != ReceivableStatus.CANCELLED
+        }
+        if (openReceivables.isEmpty()) {
+            pdf.line("Нет открытых оплат")
+        } else {
+            openReceivables.forEach { receivable ->
+                val client = data.clients.firstOrNull { it.id == receivable.clientId }?.name ?: "Клиент"
+                pdf.line(
+                    "$client — ${receivable.title}: " +
+                        "${formatMoney((receivable.amountMinor - receivable.receivedMinor).coerceAtLeast(0), receivable.currency)} " +
+                        "до ${LocalDate.ofEpochDay(receivable.expectedAtEpochDay)}",
+                )
+            }
+        }
+
+        pdf.space(12f)
+        pdf.heading("Операции")
+        if (data.transactions.isEmpty()) {
+            pdf.line("Нет операций")
+        } else {
+            data.transactions.forEach { tx ->
+                val sign = if (tx.type == TransactionType.INCOME) "+" else "−"
+                val date = Instant.ofEpochMilli(tx.occurredAtEpochMillis)
+                    .atZone(ZoneId.systemDefault())
+                    .toLocalDate()
+                pdf.line("$date · $sign ${formatMoney(tx.amountMinor, tx.currency)} · ${tx.category}")
+            }
+        }
+
+        pdf.finish()
+        context.contentResolver.openOutputStream(uri)?.use { document.writeTo(it) }
+            ?: error("Не удалось открыть файл для PDF")
+        document.close()
     }
-    private fun csv(value:String)="\"${value.replace("\"","\"\"")}\""
+
+    private fun csv(value: String): String {
+        val safe = if (value.firstOrNull() in setOf('=', '+', '-', '@', '\t', '\r')) "'$value" else value
+        return "\"${safe.replace("\"", "\"\"")}\""
+    }
+
+    private class PdfWriter(private val document: PdfDocument) {
+        private val body = Paint().apply { textSize = 10.5f; isAntiAlias = true }
+        private val heading = Paint().apply { textSize = 14f; isFakeBoldText = true; isAntiAlias = true }
+        private var pageNumber = 0
+        private var page: PdfDocument.Page? = null
+        private var y = 0f
+
+        init {
+            newPage()
+        }
+
+        fun heading(text: String, size: Float = 14f) {
+            ensureSpace(28f)
+            heading.textSize = size
+            drawWrapped(text, heading, lineHeight = size + 5f)
+            y += 5f
+        }
+
+        fun line(text: String) {
+            ensureSpace(20f)
+            drawWrapped(text, body, lineHeight = 15f)
+        }
+
+        fun space(value: Float) {
+            ensureSpace(value)
+            y += value
+        }
+
+        fun finish() {
+            finishCurrentPage()
+        }
+
+        private fun newPage() {
+            finishCurrentPage()
+            pageNumber += 1
+            page = document.startPage(PdfDocument.PageInfo.Builder(595, 842, pageNumber).create())
+            y = 44f
+        }
+
+        private fun finishCurrentPage() {
+            val current = page ?: return
+            val footer = Paint().apply { textSize = 7.5f; isAntiAlias = true }
+            current.canvas.drawText(
+                "Norvexa Flow · личное планирование, не бухгалтерская или налоговая отчётность · стр. $pageNumber",
+                40f,
+                815f,
+                footer,
+            )
+            document.finishPage(current)
+            page = null
+        }
+
+        private fun ensureSpace(required: Float) {
+            if (y + required > 790f) newPage()
+        }
+
+        private fun drawWrapped(text: String, paint: Paint, lineHeight: Float) {
+            val canvas = page?.canvas ?: return
+            val maxWidth = 515f
+            var rest = text
+            while (rest.isNotEmpty()) {
+                ensureSpace(lineHeight)
+                var count = paint.breakText(rest, true, maxWidth, null).coerceAtLeast(1)
+                if (count < rest.length) {
+                    val split = rest.lastIndexOf(' ', startIndex = count - 1)
+                    if (split > 0) count = split
+                }
+                val line = rest.take(count).trimEnd()
+                canvas.drawText(line, 40f, y, paint)
+                y += lineHeight
+                rest = rest.drop(count).trimStart()
+            }
+        }
+    }
 }

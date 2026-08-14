@@ -10,8 +10,8 @@ permissions:
 
 jobs:
   publish:
-    if: contains(github.event.head_commit.message, '[release ui-alpha01]')
-    name: Build and publish v0.2.0-alpha01
+    if: contains(github.event.head_commit.message, '[release audit-alpha01]')
+    name: Build and publish v0.2.1-alpha01
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -41,34 +41,49 @@ jobs:
 
       - name: Prepare release asset
         run: |
-          cp app/build/outputs/apk/debug/app-debug.apk Norvexa-Flow-0.2.0-alpha01.apk
-          sha256sum Norvexa-Flow-0.2.0-alpha01.apk > Norvexa-Flow-0.2.0-alpha01.sha256
+          cp app/build/outputs/apk/debug/app-debug.apk Norvexa-Flow-0.2.1-alpha01.apk
+          sha256sum Norvexa-Flow-0.2.1-alpha01.apk > Norvexa-Flow-0.2.1-alpha01.sha256
           cat > release-notes.md <<'NOTES'
-          Norvexa Flow 0.2.0 alpha01 — крупный UI/UX редизайн.
+          Norvexa Flow 0.2.1 alpha01 — audit and financial-integrity release.
 
-          Основные изменения:
-          - новая дизайн-система в духе Apple Human Interface Guidelines;
-          - iOS-подобная светлая и тёмная палитра;
-          - крупная типографика и более ясная визуальная иерархия;
-          - переработанный финансовый обзор;
-          - новая нижняя навигация и меню добавления;
-          - компактные карточки операций, клиентов и будущих платежей;
-          - полностью переработанный раздел настроек без дублирующих кнопок;
-          - новый onboarding;
-          - единые радиусы, отступы, состояния, иконки и группировка данных;
-          - сохранён весь функционал версии 0.1.0.
+          Исправлено:
+          - получение ожидаемой оплаты теперь создаёт реальный доход и зачисляет деньги в выбранный кошелёк;
+          - оплата планового расхода создаёт фактический расход и списывает деньги с выбранного кошелька;
+          - recurring-расходы переносятся на следующий период и учитываются в прогнозе;
+          - просроченные обязательства больше не выпадают из cash-flow;
+          - плановый налоговый резерв рассчитывается по доходам текущего месяца и влияет на доступные деньги;
+          - смена базовой валюты после onboarding заблокирована до появления безопасного мастера пересчёта;
+          - мультивалютные суммы используют ISO fraction digits, включая JPY;
+          - добавлена Room migration 1 -> 2 без destructive fallback;
+          - автоматические settlement-транзакции связаны с источником и защищены от отдельного удаления;
+          - backup `.nvxflow` обновлён до v2: сохраняет финансовые настройки и settlement metadata, валидирует входные данные и ограничивает размер;
+          - legacy backup v1 остаётся читаемым с проверкой базовой валюты;
+          - CSV больше не использует Double для денежных значений и защищён от spreadsheet formula injection;
+          - PDF-отчёт стал многостраничным;
+          - разрешение уведомлений запрашивается после onboarding;
+          - исправлены mixed-currency суммы клиентов и минимальные touch targets;
+          - добавлены regression-тесты на найденные ошибки.
 
-          Это debug-подписанная тестовая сборка. При обновлении с предыдущей alpha Android может потребовать удалить старую debug-сборку из-за смены временного debug-ключа CI.
+          Известное ограничение alpha: локальная Room DB и `.nvxflow` backups пока не зашифрованы at rest. Это будет отдельная data-preserving security migration.
           NOTES
+
+      - name: Upload exact release build
+        uses: actions/upload-artifact@v4
+        with:
+          name: Norvexa-Flow-0.2.1-alpha01-release
+          path: |
+            Norvexa-Flow-0.2.1-alpha01.apk
+            Norvexa-Flow-0.2.1-alpha01.sha256
+          if-no-files-found: error
 
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create v0.2.0-alpha01 \
-            Norvexa-Flow-0.2.0-alpha01.apk \
-            Norvexa-Flow-0.2.0-alpha01.sha256 \
+          gh release create v0.2.1-alpha01 \
+            Norvexa-Flow-0.2.1-alpha01.apk \
+            Norvexa-Flow-0.2.1-alpha01.sha256 \
             --target "$GITHUB_SHA" \
-            --title "Norvexa Flow 0.2.0 alpha01" \
+            --title "Norvexa Flow 0.2.1 alpha01" \
             --notes-file release-notes.md \
             --prerelease

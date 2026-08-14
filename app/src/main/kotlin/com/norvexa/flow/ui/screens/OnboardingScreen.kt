@@ -1,6 +1,15 @@
 package com.norvexa.flow.ui.screens
 
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -28,7 +37,8 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
-import com.norvexa.flow.domain.parseMinor
+import com.norvexa.flow.domain.isValidCurrencyCode
+import com.norvexa.flow.domain.parseMinorForCurrency
 import com.norvexa.flow.ui.components.GroupCard
 import com.norvexa.flow.ui.components.IconBubble
 
@@ -43,11 +53,13 @@ fun OnboardingScreen(
     var wallet by remember { mutableStateOf("Основной кошелёк") }
     var balance by remember { mutableStateOf("0") }
 
-    val finalPageValid = currency.length == 3 &&
+    val parsedSafe = parseMinorForCurrency(safe, currency)
+    val parsedBalance = parseMinorForCurrency(balance, currency)
+    val finalPageValid = isValidCurrencyCode(currency) &&
         wallet.isNotBlank() &&
         tax.toIntOrNull() in 0..95 &&
-        parseMinor(safe) != null &&
-        parseMinor(balance) != null
+        (parsedSafe ?: -1) >= 0 &&
+        parsedBalance != null
 
     Surface(
         modifier = Modifier.fillMaxSize(),
@@ -105,6 +117,10 @@ fun OnboardingScreen(
                                     value = currency,
                                     onValueChange = { currency = it.uppercase().take(3) },
                                     label = { Text("Базовая валюта") },
+                                    supportingText = if (currency.length == 3 && !isValidCurrencyCode(currency)) {
+                                        { Text("Используйте код ISO 4217, например USD, EUR, PLN") }
+                                    } else null,
+                                    isError = currency.length == 3 && !isValidCurrencyCode(currency),
                                     singleLine = true,
                                     modifier = Modifier.fillMaxWidth(),
                                 )
@@ -119,7 +135,7 @@ fun OnboardingScreen(
                                 OutlinedTextField(
                                     value = safe,
                                     onValueChange = { safe = it },
-                                    label = { Text("Безопасный остаток") },
+                                    label = { Text("Безопасный остаток · $currency") },
                                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                                     singleLine = true,
                                     modifier = Modifier.fillMaxWidth(),
@@ -134,7 +150,7 @@ fun OnboardingScreen(
                                 OutlinedTextField(
                                     value = balance,
                                     onValueChange = { balance = it },
-                                    label = { Text("Текущий баланс") },
+                                    label = { Text("Текущий баланс · $currency") },
                                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                                     singleLine = true,
                                     modifier = Modifier.fillMaxWidth(),
@@ -165,9 +181,9 @@ fun OnboardingScreen(
                             onComplete(
                                 currency,
                                 tax.toIntOrNull() ?: 0,
-                                parseMinor(safe) ?: 0,
+                                parsedSafe ?: 0,
                                 wallet,
-                                parseMinor(balance) ?: 0,
+                                parsedBalance ?: 0,
                             )
                         }
                     },

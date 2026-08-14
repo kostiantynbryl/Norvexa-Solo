@@ -62,7 +62,7 @@ fun DashboardScreen(
             MetricCard(
                 title = "Доступно сейчас",
                 value = formatMoney(summary.availableNowMinor, currency),
-                supporting = "После защищённых резервов и обязательных расходов на 30 дней",
+                supporting = "После защищённых резервов, недостающего налогового резерва и обязательных расходов на 30 дней",
                 emphasized = true,
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -86,6 +86,26 @@ fun DashboardScreen(
                     } else {
                         "Без просрочек"
                     },
+                    modifier = Modifier.weight(1f),
+                )
+            }
+        }
+
+        item {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                MetricCard(
+                    title = "Защищено",
+                    value = formatMoney(summary.protectedReservesMinor, currency),
+                    supporting = "Не считается свободными деньгами",
+                    modifier = Modifier.weight(1f),
+                )
+                MetricCard(
+                    title = "Налоговый резерв",
+                    value = formatMoney(summary.suggestedTaxReserveMinor, currency),
+                    supporting = "План на доходы текущего месяца",
                     modifier = Modifier.weight(1f),
                 )
             }
@@ -127,9 +147,9 @@ fun DashboardScreen(
                         }
                         Text(
                             text = if (healthy) {
-                                "На горизонте 30 дней баланс остаётся выше безопасного уровня."
+                                "На горизонте 30 дней баланс остаётся выше минимально допустимого уровня с учётом резервов."
                             } else {
-                                "${summary.cashGap?.date}: прогноз ${formatMoney(summary.cashGap?.balanceMinor ?: 0, currency)} при безопасном уровне ${formatMoney(summary.cashGap?.safeBalanceMinor ?: 0, currency)}."
+                                "${summary.cashGap?.date}: прогноз ${formatMoney(summary.cashGap?.balanceMinor ?: 0, currency)} при минимально допустимом уровне ${formatMoney(summary.cashGap?.safeBalanceMinor ?: 0, currency)}."
                             },
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,

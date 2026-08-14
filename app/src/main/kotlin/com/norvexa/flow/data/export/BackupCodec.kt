@@ -115,6 +115,8 @@ object BackupCodec {
         put("category", v.category)
         put("note", v.note)
         put("occurredAtEpochMillis", v.occurredAtEpochMillis)
+        put("sourceType", v.sourceType ?: JSONObject.NULL)
+        put("sourceId", v.sourceId ?: JSONObject.NULL)
     }
 
     private fun transactionFromJson(v: JSONObject) = TransactionEntity(
@@ -128,6 +130,8 @@ object BackupCodec {
         category = v.getString("category"),
         note = v.optString("note"),
         occurredAtEpochMillis = v.getLong("occurredAtEpochMillis"),
+        sourceType = if (!v.has("sourceType") || v.isNull("sourceType")) null else v.getString("sourceType"),
+        sourceId = if (!v.has("sourceId") || v.isNull("sourceId")) null else v.getLong("sourceId"),
     )
 
     private fun clientToJson(v: ClientEntity) = JSONObject().apply {

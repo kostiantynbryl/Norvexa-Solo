@@ -12,7 +12,14 @@ import kotlinx.coroutines.flow.map
 
 private val Context.settingsDataStore by preferencesDataStore(name = "norvexa_flow_settings")
 
-data class UserSettings(val onboardingCompleted: Boolean = false, val baseCurrency: String = "USD", val taxPercent: Int = 10, val safeBalanceMinor: Long = 0, val darkMode: String = "SYSTEM", val privacyMode: Boolean = false)
+data class UserSettings(
+    val onboardingCompleted: Boolean = false,
+    val baseCurrency: String = "USD",
+    val taxPercent: Int = 10,
+    val safeBalanceMinor: Long = 0,
+    val darkMode: String = "SYSTEM",
+    val privacyMode: Boolean = false,
+)
 
 class SettingsStore(private val context: Context) {
     private object Keys {
@@ -23,11 +30,64 @@ class SettingsStore(private val context: Context) {
         val darkMode = stringPreferencesKey("dark_mode")
         val privacyMode = booleanPreferencesKey("privacy_mode")
     }
+
     val settings: Flow<UserSettings> = context.settingsDataStore.data.map { prefs ->
-        UserSettings(prefs[Keys.onboarding] ?: false, prefs[Keys.baseCurrency] ?: "USD", prefs[Keys.taxPercent] ?: 10, prefs[Keys.safeBalance] ?: 0, prefs[Keys.darkMode] ?: "SYSTEM", prefs[Keys.privacyMode] ?: false)
+        UserSettings(
+            onboardingCompleted = prefs[Keys.onboarding] ?: false,
+            baseCurrency = prefs[Keys.baseCurrency] ?: "USD",
+            taxPercent = prefs[Keys.taxPercent] ?: 10,
+            safeBalanceMinor = prefs[Keys.safeBalance] ?: 0,
+            darkMode = prefs[Keys.darkMode] ?: "SYSTEM",
+            privacyMode = prefs[Keys.privacyMode] ?: false,
+        )
     }
-    suspend fun completeOnboarding(baseCurrency: String, taxPercent: Int, safeBalanceMinor: Long) { context.settingsDataStore.edit { it[Keys.onboarding] = true; it[Keys.baseCurrency] = baseCurrency.uppercase(); it[Keys.taxPercent] = taxPercent.coerceIn(0,95); it[Keys.safeBalance] = safeBalanceMinor.coerceAtLeast(0) } }
-    suspend fun updateFinancialSettings(baseCurrency: String, taxPercent: Int, safeBalanceMinor: Long) { context.settingsDataStore.edit { it[Keys.baseCurrency] = baseCurrency.uppercase(); it[Keys.taxPercent] = taxPercent.coerceIn(0,95); it[Keys.safeBalance] = safeBalanceMinor.coerceAtLeast(0) } }
-    suspend fun setTheme(value: String) { context.settingsDataStore.edit { it[Keys.darkMode] = value } }
-    suspend fun setPrivacyMode(value: Boolean) { context.settingsDataStore.edit { it[Keys.privacyMode] = value } }
+
+    suspend fun completeOnboarding(
+        baseCurrency: String,
+        taxPercent: Int,
+        safeBalanceMinor: Long,
+    ) {
+        context.settingsDataStore.edit {
+            it[Keys.onboarding] = true
+            it[Keys.baseCurrency] = baseCurrency.uppercase()
+            it[Keys.taxPercent] = taxPercent.coerceIn(0, 95)
+            it[Keys.safeBalance] = safeBalanceMinor.coerceAtLeast(0)
+        }
+    }
+
+    /**
+     * Base currency is intentionally immutable after onboarding. Changing it without
+     * recalculating every stored historical exchange rate would corrupt aggregates.
+     */
+    suspend fun updateFinancialSettings(
+        taxPercent: Int,
+        safeBalanceMinor: Long,
+    ) {
+        context.settingsDataStore.edit {
+            it[Keys.taxPercent] = taxPercent.coerceIn(0, 95)
+            it[Keys.safeBalance] = safeBalanceMinor.coerceAtLeast(0)
+        }
+    }
+
+    suspend fun restoreFinancialSettings(
+        baseCurrency: String,
+        taxPercent: Int,
+        safeBalanceMinor: Long,
+    ) {
+        context.settingsDataStore.edit {
+            it[Keys.onboarding] = true
+            it[Keys.baseCurrency] = baseCurrency.uppercase()
+            it[Keys.taxPercent] = taxPercent.coerceIn(0, 95)
+            it[Keys.safeBalance] = safeBalanceMinor.coerceAtLeast(0)
+        }
+    }
+
+    suspend fun setTheme(value: String) {
+        require(value in setOf("SYSTEM", "LIGHT", "DARK"))
+        context.settingsDataStore.edit { it[Keys.darkMode] = value }
+    }
+
+    suspend fun setPrivacyMode(value: Boolean) {
+        context.settingsDataStore.edit { it[Keys.privacyMode] = value }
+    }
 }

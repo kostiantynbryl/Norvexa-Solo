@@ -29,11 +29,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import com.norvexa.flow.data.local.ClientEntity
 import com.norvexa.flow.data.local.PlannedExpenseEntity
 import com.norvexa.flow.data.local.ReceivableEntity
 import com.norvexa.flow.data.local.ReserveEntity
 import com.norvexa.flow.data.local.WalletEntity
-import com.norvexa.flow.data.local.ClientEntity
 import com.norvexa.flow.data.settings.UserSettings
 import com.norvexa.flow.domain.MarginInput
 import com.norvexa.flow.domain.MarginResult
@@ -41,7 +41,9 @@ import com.norvexa.flow.domain.PriceInput
 import com.norvexa.flow.domain.PriceResult
 import com.norvexa.flow.domain.TransactionType
 import com.norvexa.flow.domain.formatMoney
-import com.norvexa.flow.domain.parseMinor
+import com.norvexa.flow.domain.isValidCurrencyCode
+import com.norvexa.flow.domain.minorToDecimal
+import com.norvexa.flow.domain.parseMinorForCurrency
 import com.norvexa.flow.domain.parseRateMicros
 import java.time.LocalDate
 
@@ -55,8 +57,10 @@ fun AddWalletDialog(
     var currency by remember { mutableStateOf(baseCurrency) }
     var balance by remember { mutableStateOf("0") }
     var rate by remember { mutableStateOf("1") }
-    val valid = name.isNotBlank() && currency.length == 3 &&
-        parseMinor(balance) != null && parseRateMicros(rate) != null
+    val valid = name.isNotBlank() &&
+        isValidCurrencyCode(currency) &&
+        parseMinorForCurrency(balance, currency) != null &&
+        (currency == baseCurrency || (parseRateMicros(rate) ?: 0) > 0)
 
     FormDialog(
         title = "Новый кошелёк",
@@ -66,7 +70,7 @@ fun AddWalletDialog(
             onSave(
                 name.trim(),
                 currency,
-                parseMinor(balance) ?: 0,
+                parseMinorForCurrency(balance, currency) ?: 0,
                 if (currency == baseCurrency) 1_000_000 else parseRateMicros(rate) ?: 1_000_000,
             )
         },
@@ -88,7 +92,7 @@ fun AddTransactionDialog(
     onDismiss: () -> Unit,
     onSave: (Long, String, Long, String, String, Long?) -> Unit,
 ) {
-    var walletId by remember(wallets) { mutableLongStateOf(wallets.firstOrNull()?.id ?: 0) }
+    var walletId by remember(wallets) { mutableLongStateOf(wallets.firstOrNull { it.isActive }?.id ?: 0) }
     var type by remember { mutableStateOf(initialType) }
     var amount by remember { mutableStateOf("") }
     var category by remember {
@@ -96,12 +100,14 @@ fun AddTransactionDialog(
     }
     var note by remember { mutableStateOf("") }
     var clientId by remember { mutableStateOf<Long?>(null) }
+    val selectedWallet = wallets.firstOrNull { it.id == walletId }
+    val parsedAmount = selectedWallet?.let { parseMinorForCurrency(amount, it.currency) }
 
     FormDialog(
         title = if (type == TransactionType.INCOME) "Добавить доход" else "Добавить расход",
         onDismiss = onDismiss,
-        valid = walletId != 0L && (parseMinor(amount) ?: 0) > 0,
-        onSave = { onSave(walletId, type, parseMinor(amount) ?: 0, category, note, clientId) },
+        valid = walletId != 0L && (parsedAmount ?: 0) > 0,
+        onSave = { onSave(walletId, type, parsedAmount ?: 0, category, note, clientId) },
     ) {
         Selector(
             label = "Тип",
@@ -111,11 +117,11 @@ fun AddTransactionDialog(
         )
         Selector(
             label = "Кошелёк",
-            selected = wallets.firstOrNull { it.id == walletId }?.name ?: "Нет кошельков",
-            options = wallets.map { it.name to it.id },
+            selected = selectedWallet?.name ?: "Нет кошельков",
+            options = wallets.filter { it.isActive }.map { it.name to it.id },
             onSelected = { walletId = it },
         )
-        NumberField(amount, { amount = it }, "Сумма")
+        NumberField(amount, { amount = it }, "Сумма${selectedWallet?.currency?.let { " · $it" }.orEmpty()}")
         Field(category, { category = it }, "Категория")
         if (clients.isNotEmpty()) {
             Selector(
@@ -143,7 +149,7 @@ fun AddClientDialog(
     FormDialog(
         title = "Новый клиент",
         onDismiss = onDismiss,
-        valid = name.isNotBlank() && currency.length == 3,
+        valid = name.isNotBlank() && isValidCurrencyCode(currency),
         onSave = { onSave(name.trim(), email.trim(), currency, note.trim()) },
     ) {
         Field(name, { name = it }, "Имя или компания")
@@ -170,8 +176,13 @@ fun AddReceivableDialog(
     var note by remember { mutableStateOf("") }
     val parsedDate = runCatching { LocalDate.parse(date) }.getOrNull()
     val parsedProbability = probability.toIntOrNull()
-    val valid = clientId != 0L && title.isNotBlank() && (parseMinor(amount) ?: 0) > 0 &&
-        parsedDate != null && (parsedProbability ?: -1) in 0..100 && parseRateMicros(rate) != null
+    val parsedAmount = parseMinorForCurrency(amount, currency)
+    val valid = clientId != 0L && title.isNotBlank() &&
+        isValidCurrencyCode(currency) &&
+        (parsedAmount ?: 0) > 0 &&
+        parsedDate != null &&
+        (parsedProbability ?: -1) in 0..100 &&
+        (currency == baseCurrency || (parseRateMicros(rate) ?: 0) > 0)
 
     FormDialog(
         title = "Ожидаемая оплата",
@@ -182,7 +193,7 @@ fun AddReceivableDialog(
                 ReceivableEntity(
                     clientId = clientId,
                     title = title.trim(),
-                    amountMinor = parseMinor(amount) ?: 0,
+                    amountMinor = parsedAmount ?: 0,
                     currency = currency,
                     rateToBaseMicros = if (currency == baseCurrency) 1_000_000 else parseRateMicros(rate) ?: 1_000_000,
                     expectedAtEpochDay = parsedDate?.toEpochDay() ?: LocalDate.now().toEpochDay(),
@@ -206,7 +217,7 @@ fun AddReceivableDialog(
             )
         }
         Field(title, { title = it }, "Проект или назначение")
-        NumberField(amount, { amount = it }, "Сумма")
+        NumberField(amount, { amount = it }, "Сумма · $currency")
         Field(currency, { currency = it.uppercase().take(3) }, "Валюта")
         if (currency != baseCurrency) {
             NumberField(rate, { rate = it }, "Курс: 1 $currency = ? $baseCurrency")
@@ -233,8 +244,12 @@ fun AddExpenseDialog(
     var recurrence by remember { mutableStateOf("NONE") }
     var note by remember { mutableStateOf("") }
     val parsedDate = runCatching { LocalDate.parse(date) }.getOrNull()
-    val valid = title.isNotBlank() && (parseMinor(amount) ?: 0) > 0 &&
-        parsedDate != null && parseRateMicros(rate) != null
+    val parsedAmount = parseMinorForCurrency(amount, currency)
+    val valid = title.isNotBlank() &&
+        isValidCurrencyCode(currency) &&
+        (parsedAmount ?: 0) > 0 &&
+        parsedDate != null &&
+        (currency == baseCurrency || (parseRateMicros(rate) ?: 0) > 0)
 
     FormDialog(
         title = "Будущий расход",
@@ -244,11 +259,11 @@ fun AddExpenseDialog(
             onSave(
                 PlannedExpenseEntity(
                     title = title.trim(),
-                    amountMinor = parseMinor(amount) ?: 0,
+                    amountMinor = parsedAmount ?: 0,
                     currency = currency,
                     rateToBaseMicros = if (currency == baseCurrency) 1_000_000 else parseRateMicros(rate) ?: 1_000_000,
                     dueAtEpochDay = parsedDate?.toEpochDay() ?: LocalDate.now().toEpochDay(),
-                    category = category,
+                    category = category.trim().ifEmpty { "Обязательные расходы" },
                     isMandatory = mandatory,
                     recurrence = recurrence,
                     note = note.trim(),
@@ -257,9 +272,9 @@ fun AddExpenseDialog(
         },
     ) {
         Field(title, { title = it }, "Название")
-        NumberField(amount, { amount = it }, "Сумма")
+        NumberField(amount, { amount = it }, "Сумма · $currency")
         Field(currency, { currency = it.uppercase().take(3) }, "Валюта")
-        if (currency != baseCurrency) NumberField(rate, { rate = it }, "Курс")
+        if (currency != baseCurrency) NumberField(rate, { rate = it }, "Курс: 1 $currency = ? $baseCurrency")
         Field(date, { date = it }, "Дата YYYY-MM-DD")
         Field(category, { category = it }, "Категория")
         Selector(
@@ -287,17 +302,19 @@ fun AddReserveDialog(
     var current by remember { mutableStateOf("0") }
     var type by remember { mutableStateOf("CUSTOM") }
     var isProtected by remember { mutableStateOf(true) }
+    val parsedTarget = parseMinorForCurrency(target, baseCurrency)
+    val parsedCurrent = parseMinorForCurrency(current, baseCurrency)
 
     FormDialog(
         title = "Новый резерв",
         onDismiss = onDismiss,
-        valid = name.isNotBlank() && (parseMinor(target) ?: 0) > 0 && parseMinor(current) != null,
+        valid = name.isNotBlank() && (parsedTarget ?: 0) > 0 && (parsedCurrent ?: -1) >= 0,
         onSave = {
             onSave(
                 ReserveEntity(
                     name = name.trim(),
-                    targetMinor = parseMinor(target) ?: 0,
-                    currentMinor = parseMinor(current) ?: 0,
+                    targetMinor = parsedTarget ?: 0,
+                    currentMinor = parsedCurrent ?: 0,
                     currency = baseCurrency,
                     type = type,
                     isProtected = isProtected,
@@ -306,8 +323,8 @@ fun AddReserveDialog(
         },
     ) {
         Field(name, { name = it }, "Название")
-        NumberField(target, { target = it }, "Целевая сумма")
-        NumberField(current, { current = it }, "Уже отложено")
+        NumberField(target, { target = it }, "Целевая сумма · $baseCurrency")
+        NumberField(current, { current = it }, "Уже отложено · $baseCurrency")
         Selector(
             label = "Тип",
             selected = reserveTypeLabel(type),
@@ -332,15 +349,16 @@ fun UpdateReserveDialog(
     onDismiss: () -> Unit,
     onSave: (Long) -> Unit,
 ) {
-    var amount by remember { mutableStateOf((reserve.currentMinor / 100.0).toString()) }
+    var amount by remember { mutableStateOf(minorToDecimal(reserve.currentMinor, reserve.currency).toPlainString()) }
+    val parsed = parseMinorForCurrency(amount, reserve.currency)
     FormDialog(
         title = "Изменить резерв",
         onDismiss = onDismiss,
-        valid = parseMinor(amount) != null,
-        onSave = { onSave(parseMinor(amount) ?: 0) },
+        valid = (parsed ?: -1) >= 0,
+        onSave = { onSave(parsed ?: 0) },
     ) {
         Text(reserve.name, fontWeight = FontWeight.SemiBold)
-        NumberField(amount, { amount = it }, "Текущая сумма")
+        NumberField(amount, { amount = it }, "Текущая сумма · ${reserve.currency}")
     }
 }
 
@@ -348,26 +366,67 @@ fun UpdateReserveDialog(
 fun SettingsDialog(
     settings: UserSettings,
     onDismiss: () -> Unit,
-    onSave: (String, Int, Long) -> Unit,
+    onSave: (Int, Long) -> Unit,
 ) {
-    var currency by remember { mutableStateOf(settings.baseCurrency) }
     var tax by remember { mutableStateOf(settings.taxPercent.toString()) }
-    var safe by remember { mutableStateOf((settings.safeBalanceMinor / 100.0).toString()) }
+    var safe by remember {
+        mutableStateOf(minorToDecimal(settings.safeBalanceMinor, settings.baseCurrency).toPlainString())
+    }
     val parsedTax = tax.toIntOrNull()
+    val parsedSafe = parseMinorForCurrency(safe, settings.baseCurrency)
 
     FormDialog(
         title = "Финансовые настройки",
         onDismiss = onDismiss,
-        valid = currency.length == 3 && (parsedTax ?: -1) in 0..95 && parseMinor(safe) != null,
-        onSave = { onSave(currency, parsedTax ?: 0, parseMinor(safe) ?: 0) },
+        valid = (parsedTax ?: -1) in 0..95 && (parsedSafe ?: -1) >= 0,
+        onSave = { onSave(parsedTax ?: 0, parsedSafe ?: 0) },
     ) {
-        Field(currency, { currency = it.uppercase().take(3) }, "Базовая валюта")
+        Text(
+            "Базовая валюта: ${settings.baseCurrency}",
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Text(
+            "Для сохранения исторических курсов базовая валюта фиксируется после первоначальной настройки.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
         NumberField(tax, { tax = it.filter(Char::isDigit).take(2) }, "Плановый налоговый резерв, %", decimal = false)
-        NumberField(safe, { safe = it }, "Безопасный остаток")
+        NumberField(safe, { safe = it }, "Безопасный остаток · ${settings.baseCurrency}")
         Text(
             "Ставки задаются пользователем. Это не налоговая консультация.",
             style = MaterialTheme.typography.bodySmall,
         )
+    }
+}
+
+@Composable
+fun WalletPickerDialog(
+    title: String,
+    amountLabel: String,
+    wallets: List<WalletEntity>,
+    onDismiss: () -> Unit,
+    onSave: (Long) -> Unit,
+) {
+    val activeWallets = wallets.filter { it.isActive }
+    var walletId by remember(activeWallets) { mutableLongStateOf(activeWallets.firstOrNull()?.id ?: 0L) }
+    FormDialog(
+        title = title,
+        onDismiss = onDismiss,
+        valid = walletId != 0L,
+        onSave = { onSave(walletId) },
+    ) {
+        Text(amountLabel, style = MaterialTheme.typography.bodyMedium)
+        if (activeWallets.isEmpty()) {
+            Text("Сначала добавьте активный кошелёк", color = MaterialTheme.colorScheme.error)
+        } else {
+            Selector(
+                label = "Кошелёк",
+                selected = activeWallets.firstOrNull { it.id == walletId }?.name ?: "Выберите",
+                options = activeWallets.map { "${it.name} · ${it.currency}" to it.id },
+                onSelected = { walletId = it },
+            )
+        }
     }
 }
 
@@ -420,12 +479,12 @@ fun PriceCalculatorDialog(
                     runCatching {
                         calculate(
                             PriceInput(
-                                desiredNetMonthlyMinor = parseMinor(net) ?: 0,
-                                monthlyBusinessCostsMinor = parseMinor(costs) ?: 0,
-                                monthlyReserveContributionMinor = parseMinor(reserve) ?: 0,
+                                desiredNetMonthlyMinor = parseMinorForCurrency(net, currency) ?: 0,
+                                monthlyBusinessCostsMinor = parseMinorForCurrency(costs, currency) ?: 0,
+                                monthlyReserveContributionMinor = parseMinorForCurrency(reserve, currency) ?: 0,
                                 billableHoursPerMonth = billable.toIntOrNull() ?: 0,
                                 projectHours = hours.toIntOrNull() ?: 0,
-                                directProjectCostsMinor = parseMinor(direct) ?: 0,
+                                directProjectCostsMinor = parseMinorForCurrency(direct, currency) ?: 0,
                                 taxPercent = tax.toIntOrNull() ?: 0,
                                 feePercent = fee.toIntOrNull() ?: 0,
                                 riskPercent = risk.toIntOrNull() ?: 0,
@@ -482,10 +541,10 @@ fun MarginCalculatorDialog(
                     runCatching {
                         calculate(
                             MarginInput(
-                                revenueMinor = parseMinor(revenue) ?: 0,
-                                directCostsMinor = parseMinor(costs) ?: 0,
+                                revenueMinor = parseMinorForCurrency(revenue, currency) ?: 0,
+                                directCostsMinor = parseMinorForCurrency(costs, currency) ?: 0,
                                 hours = hours.toIntOrNull() ?: 0,
-                                hourlyCostMinor = parseMinor(hourly) ?: 0,
+                                hourlyCostMinor = parseMinorForCurrency(hourly, currency) ?: 0,
                                 taxPercent = tax.toIntOrNull() ?: 0,
                                 feePercent = fee.toIntOrNull() ?: 0,
                             ),

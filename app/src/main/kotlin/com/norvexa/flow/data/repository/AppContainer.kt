@@ -10,7 +10,9 @@ class AppContainer(context: Context) {
         context.applicationContext,
         NorvexaDatabase::class.java,
         "norvexa-flow.db",
-    ).build()
+    )
+        .addMigrations(NorvexaDatabase.MIGRATION_1_2)
+        .build()
 
     val settingsStore = SettingsStore(context.applicationContext)
     val repository = FinanceRepository(database, database.financeDao())
